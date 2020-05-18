@@ -9,7 +9,7 @@ Usage:
 
 $> python lstchain_add_pulsar_parameters.py 
 --input-file dl2_LST-1.Run02033.0137.h5
---eph-file
+--eph-file eph_J0531+21_2019-2020/eph_0531+21_58818_58833_58849_J.par
 
 """
 
@@ -44,17 +44,16 @@ parser.add_argument('--input-file', '-f', type=str,
                     help='path to a DL2 HDF5 file',
                     default=None, required=True)
 
-parser.add_argument('--path-models', '-p', action='store', type=str,
-                     dest='path_models',
-                     help='Path where to find the trained RF',
-                     default='./trained_models')
+parser.add_argument('--eph-file', '-e', action='store', type=str,
+                     dest='eph_file',
+                     help='Path where to find the ephemeris file',
+                     default=None)
 
 # Optional arguments
 parser.add_argument('--output-dir', '-o', action='store', type=str,
                      dest='output_dir',
                      help='Path where to store the reco dl2 events',
                      default='./dl2_data')
-
 
 parser.add_argument('--config', '-c', action='store', type=str,
                     dest='config_file',
@@ -87,6 +86,11 @@ def main():
 
     string_array = []
     
+    if os.path.exists(args.eph_file):
+        model = models.get_model(args.eph_file)
+    else:
+        raise IOError(f'The ephemeris file {args.eph_file} does not exist, exiting.')
+
     data = pd.read_hdf(args.input_file, key=dl2_params_lstcam_key)
     timestamp = data['dragon_time']
     utc = Time(timestamp, format='unix', scale='utc')
@@ -103,8 +107,8 @@ def main():
             
     t = toa.get_TOAs(f'{output_file}.tim', usepickle=False)
 
-    data['tdb'] = m.get_barycentric_toas(t)
-    data['phase'] = m.phase(t)[1]
+    data['tdb'] = model.get_barycentric_toas(t)
+    data['phase'] = model.phase(t)[1]
 
     dl2_keys = get_dataset_keys(args.input_file)
     if dl2_params_lstcam_key in dl2_keys:
