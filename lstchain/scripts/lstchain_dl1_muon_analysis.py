@@ -29,6 +29,7 @@ from lstchain.image.muon import (
     fill_muon_event,
     tag_pix_thr,
 )
+from lstchain.io.io import read_subarray_description
 from lstchain.io.io import dl1_params_lstcam_key
 from lstchain.visualization import plot_calib
 
@@ -119,6 +120,8 @@ def main():
         cam_description_table = Table.read(filename, path="instrument/telescope/camera/LSTCam")
         geom = CameraGeometry.from_table(cam_description_table)
 
+        subarray = read_subarray_description(filename, subarray_name='LST-1')
+
         with tables.open_file(filename) as file:
 
             # unfortunately pandas.read_hdf does not seem compatible with "with... as..." statements
@@ -155,9 +158,10 @@ def main():
                 #    continue
 
                 (
-                    muonintensityparam, size_outside_ring, muonringparam, good_ring,
-                    radial_distribution, mean_pixel_charge_around_ring,
-                ) = analyze_muon_event(
+                    muonintensityparam, size, size_outside_ring, muonringparam,
+                    good_ring, radial_distribution,
+                    mean_pixel_charge_around_ring, muonparameters
+                ) = analyze_muon_event(subarray,
                     event_id, image, geom, equivalent_focal_length,
                     mirror_area, args.plot_rings, args.plots_path
                 )
@@ -171,7 +175,8 @@ def main():
                 fill_muon_event(
                     output_parameters, good_ring, event_id, dragon_time,
                     muonintensityparam, muonringparam, radial_distribution,
-                    size_outside_ring, mean_pixel_charge_around_ring,
+                    size, size_outside_ring, mean_pixel_charge_around_ring,
+                    muonparameters
                 )
 
                 if max_muons is not None and num_muons == max_muons:
