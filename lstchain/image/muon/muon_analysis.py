@@ -3,7 +3,12 @@ from ctapipe.image.muon.features import ring_containment
 from ctapipe.image.muon.features import ring_completeness
 
 from ctapipe.image.cleaning import tailcuts_clean
-from ctapipe.image.muon import MuonIntensityFitter, MuonRingFitter
+from ctapipe.image.muon import MuonRingFitter
+
+# TEMPORAL PATCH until ctapipe's MuonIntensityFitter allows using pixel masks:
+#from ctapipe.image.muon import MuonIntensityFitter
+from lstchain.image.muon import MuonIntensityFitter
+
 from ctapipe.containers import MuonEfficiencyContainer, MuonParametersContainer
 from astropy.coordinates import SkyCoord
 from ctapipe.coordinates import CameraFrame, TelescopeFrame
@@ -107,7 +112,7 @@ def analyze_muon_event(subarray, event_id, image, geom, equivalent_focal_length,
     image:      `np.ndarray` number of photoelectrons in each pixel
     geom:       CameraGeometry
     equivalent_focal_length: `float` focal length of the telescope
-    mirror_area: `float` mirror area of the telescope
+    mirror_area: `float` mirror area of the telescope in square meters
     plot_rings: `bool` plot the muon ring
     plots_path: `string` path to store the figures
 
@@ -115,6 +120,7 @@ def analyze_muon_event(subarray, event_id, image, geom, equivalent_focal_length,
     ---------
 
     muonintensityoutput MuonEfficiencyContainer
+    dist_mask           ndarray, pixels used in ring intensity likelihood fit
     ring_size           float, in p.e. total intensity in ring
     size_outside_ring   float, in p.e. to check for "shower contamination"
     muonringparam       MuonParametersContainer
@@ -128,9 +134,12 @@ def analyze_muon_event(subarray, event_id, image, geom, equivalent_focal_length,
     TODO: several hard-coded quantities that can go into a configuration file
     """
 
+    lst1_tel_id = 1
+    lst1_description = subarray.tels[lst1_tel_id]
+
     tailcuts = [10, 5]
 
-    cam_rad = 2.26 * u.deg
+    cam_rad = (lst1_description.camera.geometry.guess_radius()/lst1_description.optics.equivalent_focal_length)*u.rad
 
     # some cuts for good ring selection:
     min_pix = 148                              # (8%) minimum number of pixels in the ring with >0 signal
@@ -148,7 +157,7 @@ def analyze_muon_event(subarray, event_id, image, geom, equivalent_focal_length,
     muonringparam, clean_mask, dist, image_clean = fit_muon(x, y, image, geom,
                                                             tailcuts)
 
-    mirror_radius = np.sqrt(mirror_area / np.pi)
+    mirror_radius = np.sqrt(mirror_area / np.pi) # meters
     dist_mask = np.abs(dist - muonringparam.radius
                     ) < muonringparam.radius * ring_integration_width
     pix_ring = image * dist_mask
@@ -167,9 +176,7 @@ def analyze_muon_event(subarray, event_id, image, geom, equivalent_focal_length,
     muonparameters = MuonParametersContainer()
     muonparameters.containment = ring_containment(
             muonringparam.radius,
-            cam_rad,
-            muonringparam.center_x,
-            muonringparam.center_y)
+            muonringparam.center_x, muonringparam.center_y, cam_rad)
 
     radial_distribution = radial_light_distribution(
         muonringparam.center_x,
@@ -201,8 +208,9 @@ def analyze_muon_event(subarray, event_id, image, geom, equivalent_focal_length,
                              muonringparam.center_x,
                              muonringparam.center_y,
                              muonringparam.radius,
-                             image*dist_mask,
-                             pedestal_stddev)
+                             image,
+                             pedestal_stddev,
+                             dist_mask)
 
         dist_ringwidth_mask = np.abs(dist - muonringparam.radius) < \
                               muonintensityoutput.width
@@ -232,7 +240,7 @@ def analyze_muon_event(subarray, event_id, image, geom, equivalent_focal_length,
         muonintensityoutput.impact_x = u.Quantity(np.nan, u.m)
         muonintensityoutput.impact_y = u.Quantity(np.nan, u.m)
 
-    # muonintensityoutput.mask = dist_mask
+    # muonintensityoutput.mask = dist_mask # no longer there in ctapipe 0.8
     ring_size = np.sum(pix_ring)
     size_outside_ring = np.sum(pix_outside_ring * clean_mask)
 
@@ -305,9 +313,9 @@ def analyze_muon_event(subarray, event_id, image, geom, equivalent_focal_length,
     if(plot_rings and not plots_path):
         print("You are trying to plot without giving a path!")
 
-    return muonintensityoutput, ring_size, size_outside_ring, muonringparam, \
-           good_ring, radial_distribution, mean_pixel_charge_around_ring, \
-           muonparameters
+    return muonintensityoutput, dist_mask, ring_size, size_outside_ring, \
+           muonringparam, good_ring, radial_distribution, \
+           mean_pixel_charge_around_ring, muonparameters
 
 
 def muon_filter(image, thr_low = 0, thr_up = 1.e10):
@@ -418,7 +426,7 @@ def create_muon_table():
             'radial_skewness' : [],               # Skewness of (cleaned) light distribution along ring radius
             'radial_excess_kurtosis' : [],        # Excess kurtosis of (cleaned) light distribution along ring radius
             #  missing in ctapipe 0.8:
-            #  'num_pixels_in_ring' : [],            # pixels inside the integration area around the ring
+            'num_pixels_in_ring' : [],            # pixels inside the integration area around the ring
             'mean_pixel_charge_around_ring' : [], # Average pixel charge in pixels surrounding the outer part of the ring
             'hg_peak_sample' : [],                # Peak sample of stacked HG waveforms of bright ring pixels
             'lg_peak_sample' : [],                # Peak sample of stacked LG waveforms of bright ring pixels
@@ -426,10 +434,10 @@ def create_muon_table():
 
 
 def fill_muon_event(output_parameters, good_ring, event_id, event_time,
-                    muonintensityparam, muonringparam, radial_distribution,
-                    size, size_outside_ring, mean_pixel_charge_around_ring,
-                    muonparameters, hg_peak_sample=np.nan,
-                    lg_peak_sample=np.nan):
+                    muonintensityparam, dist_mask, muonringparam,
+                    radial_distribution, size, size_outside_ring,
+                    mean_pixel_charge_around_ring, muonparameters,
+                    hg_peak_sample=np.nan, lg_peak_sample=np.nan):
 
     output_parameters['event_id'].append(event_id)
     output_parameters['event_time'].append(event_time)
@@ -451,9 +459,9 @@ def fill_muon_event(output_parameters, good_ring, event_id, event_time,
     output_parameters['radial_stdev'].append(radial_distribution['standard_dev'].value)
     output_parameters['radial_skewness'].append(radial_distribution['skewness'])
     output_parameters['radial_excess_kurtosis'].append(radial_distribution['excess_kurtosis'])
-    #  missing in ctapipe 0.8:
-    #output_parameters['num_pixels_in_ring'].append(np.sum(muonintensityparam.mask))
+    output_parameters['num_pixels_in_ring'].append(np.sum(dist_mask))
     output_parameters['mean_pixel_charge_around_ring'].append(mean_pixel_charge_around_ring)
     output_parameters['hg_peak_sample'].append(hg_peak_sample)
     output_parameters['lg_peak_sample'].append(lg_peak_sample)
+
     return
