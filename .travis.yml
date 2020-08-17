@@ -65,6 +65,7 @@ install:
 script:
     - pytest --cov lstchain --cov-report=xml lstchain
     - travis-sphinx -v --outdir=docbuild build --source=docs/
+    - travis-sphinx -v --outdir=docbuild deploy
 
 after_success:
     - travis-sphinx -v --outdir=docbuild deploy
@@ -82,3 +83,11 @@ deploy:
         tags: true
         branch: master
         condition: $TRAVIS_PYTHON_VERSION = "3.7"
+
+    provider: pages:git
+    verbose: true
+    skip_cleanup: true
+    token: $GITHUB_TOKEN
+    edge: true
+    local_dir: docbuild
+    keep_history: true
