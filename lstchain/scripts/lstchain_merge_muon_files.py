@@ -29,11 +29,23 @@ parser.add_argument('--input-dir', '-d', type=str,
                     dest='srcdir',
                     help='path to the source directory of files',
                     )
+
+# Optional arguments
+parser.add_argument('--output-file', '-o', action='store', type=str,
+                    dest='outfile',
+                    help='Path of the resulting merged file',
+                    default='merge.fits')
+
 parser.add_argument('--run-number', '-r', action='store', type=int,
                     dest='run_number',
                     help='Merge files run-wise if a run number is passed, \
                           otherwise merge all files in the directory',
                     default=None)
+
+parser.add_argument('--pattern', '-p',
+                    help='Glob pattern to match files',
+                    default='*.fits',
+)
 
 args = parser.parse_args()
 
@@ -48,11 +60,12 @@ def main():
     else:
         file_list = sorted(glob(os.path.join(args.srcdir, args.pattern)))
 
-tab = Table.read('{}'.format(file_list[0]), format='fits')
-for i in range(1,len(file_list)):
-    tab2 = Table.read('{}'.format(file_list[i]), format='fits')
-    tab = vstack([dat, dat2])
+    tab = Table.read('{}'.format(file_list[0]), format='fits')
+    for i in range(1,len(file_list)):
+        tab2 = Table.read('{}'.format(file_list[i]), format='fits')
+        tab = vstack([dat, dat2])
 
+    tab.write(args.outfile)
 
 
 if __name__ == '__main__':
