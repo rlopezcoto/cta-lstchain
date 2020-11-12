@@ -59,10 +59,18 @@ def main():
     else:
         file_list = sorted(glob(os.path.join(args.srcdir, args.pattern)))
 
+
+    if not file_list:
+        raise IOError(f'No muon files in {args.srcdir} with the parameters requested')
+
     tab = Table.read('{}'.format(file_list[0]), format='fits')
     for i in range(1,len(file_list)):
         tab2 = Table.read('{}'.format(file_list[i]), format='fits')
         tab = vstack([tab, tab2])
+
+
+    if os.path.exists(args.outfile):
+        raise IOError(args.outfile + ' exists, exiting.')
 
     tab.write(args.outfile)
 
